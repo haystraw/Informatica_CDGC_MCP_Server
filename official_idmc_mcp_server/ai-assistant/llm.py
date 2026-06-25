@@ -2,37 +2,34 @@
 LLM integration with MCP tool loop.
 
 Supports two backends, selected by environment variables:
-  1. Claude via Azure AI Foundry (ANTHROPIC_API_KEY + ANTHROPIC_BASE_URL)
+  1. Claude via Anthropic API (or Azure AI Foundry with ANTHROPIC_BASE_URL)
   2. Gemini via Google AI (GEMINI_API_KEY)
 
-Claude is used when both ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL are set.
+Claude is used when ANTHROPIC_API_KEY is set.
 """
-VERSION = "20260529.1"
 
 import json
 import logging
 import os
 from typing import Any
 
-import anthropic
-
 from mcp_client import McpClient
 
 logger = logging.getLogger("ai_assistant.llm")
 
-# Claude / Azure AI Foundry
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "")
-CLAUDE_MODEL       = os.environ.get("CLAUDE_MODEL", "claude-opus-4-6")
+CLAUDE_MODEL       = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
-# Gemini fallback
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
-_SYSTEM_PROMPT_BASE = """You are a data governance assistant with access to the Informatica
-Intelligent Data Management Cloud (IDMC), including Cloud Data Governance & Catalog (CDGC)
-and Data Marketplace. Help users search assets, explore business terms, check data quality,
-review classifications, and answer questions about their data catalog.
+_SYSTEM_PROMPT = """You are an Informatica IDMC assistant with access to several Informatica-hosted services:
+- Address Verification: standardize and validate postal addresses
+- CDGC Metadata Search: search the data governance catalog for assets, datasets, and terms
+- Customer Identification: find and match customer records in MDM Customer 360
+- Data Provisioning: manage data delivery orders in the Data Marketplace
+- Job Management: monitor and control Informatica platform jobs
 
 FORMAT RULES — follow these exactly:
 - You are responding inside an HTML chat UI. Use HTML tags for formatting, not Markdown.
@@ -42,28 +39,21 @@ FORMAT RULES — follow these exactly:
 - Never use Markdown syntax (no **, no ##, no |---|, no backticks for tables).
 - Keep responses concise. Summarize data rather than dumping raw JSON.
 - If a question requires multiple tool calls, do them efficiently.
-{asset_link_instruction}"""
-
-def _build_system_prompt(pod: str = "") -> str:
-    instruction = ""
-    return _SYSTEM_PROMPT_BASE.format(asset_link_instruction=instruction)
+- When a tool returns an error, explain it clearly and suggest what the user can try."""
 
 
 # ---------------------------------------------------------------------------
-# Claude via Azure AI Foundry
+# Claude
 # ---------------------------------------------------------------------------
 
-async def _chat_claude(user_message: str, mcp: McpClient, history: list[dict], pod: str = "") -> tuple[str, list[dict]]:
+async def _chat_claude(user_message: str, mcp: McpClient,
+                        history: list[dict]) -> tuple[str, list[dict]]:
     import anthropic
 
-    tool_declarations = await mcp.as_gemini_tools()
+    declarations = await mcp.as_tool_declarations()
     tools = [
-        {
-            "name": d["name"],
-            "description": d["description"],
-            "input_schema": d["parameters"],
-        }
-        for d in tool_declarations
+        {"name": d["name"], "description": d["description"], "input_schema": d["parameters"]}
+        for d in declarations
     ]
 
     messages = []
@@ -72,21 +62,19 @@ async def _chat_claude(user_message: str, mcp: McpClient, history: list[dict], p
         messages.append({"role": role, "content": turn["text"]})
     messages.append({"role": "user", "content": user_message})
 
-    # Azure AI Foundry gives the full endpoint URL ending in /v1/messages.
-    # The Anthropic SDK appends /v1/messages itself, so we strip that suffix
-    # to avoid doubling it. Azure also uses api-key header, not x-api-key.
-    base_url = ANTHROPIC_BASE_URL.rstrip("/")
-    for suffix in ("/v1/messages", "/messages"):
-        if base_url.endswith(suffix):
-            base_url = base_url[: -len(suffix)]
-            break
+    base_url = ANTHROPIC_BASE_URL.rstrip("/") if ANTHROPIC_BASE_URL else None
+    if base_url:
+        for suffix in ("/v1/messages", "/messages"):
+            if base_url.endswith(suffix):
+                base_url = base_url[: -len(suffix)]
+                break
 
-    client = anthropic.Anthropic(
-        api_key=ANTHROPIC_API_KEY,
-        base_url=base_url,
-        default_headers={"api-key": ANTHROPIC_API_KEY},
-        max_retries=0,  # Don't retry 429s — we fall back to Gemini instead
-    )
+    client_kwargs = {"api_key": ANTHROPIC_API_KEY, "max_retries": 0}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+        client_kwargs["default_headers"] = {"api-key": ANTHROPIC_API_KEY}
+
+    client = anthropic.Anthropic(**client_kwargs)
 
     trace = []
     MAX_ITERATIONS = 8
@@ -94,7 +82,7 @@ async def _chat_claude(user_message: str, mcp: McpClient, history: list[dict], p
         response = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=4096,
-            system=_build_system_prompt(pod),
+            system=_SYSTEM_PROMPT,
             tools=tools,
             messages=messages,
         )
@@ -113,8 +101,7 @@ async def _chat_claude(user_message: str, mcp: McpClient, history: list[dict], p
                     continue
                 logger.info("Claude calling tool: %s", block.name)
                 tool_entry = {"tool": block.name, "input": block.input, "status": "error", "error": "unknown"}
-                result_str = f"Error: tool call did not complete"
-                logger.info("Tool args: %s", json.dumps(block.input, default=str)[:300])
+                result_str = "Error: tool call did not complete"
                 try:
                     result = await mcp.call_tool(block.name, block.input)
                     result_str = result if isinstance(result, str) else json.dumps(result)
@@ -133,10 +120,8 @@ async def _chat_claude(user_message: str, mcp: McpClient, history: list[dict], p
                     "tool_use_id": block.id,
                     "content": result_str,
                 })
-
             messages.append({"role": "user", "content": tool_results})
         else:
-            # Unexpected stop reason
             trace.append({"note": f"Unexpected stop_reason: {response.stop_reason}"})
             break
 
@@ -144,14 +129,15 @@ async def _chat_claude(user_message: str, mcp: McpClient, history: list[dict], p
 
 
 # ---------------------------------------------------------------------------
-# Gemini via Google AI
+# Gemini
 # ---------------------------------------------------------------------------
 
-async def _chat_gemini(user_message: str, mcp: McpClient, history: list[dict], pod: str = "") -> tuple[str, list[dict]]:
+async def _chat_gemini(user_message: str, mcp: McpClient,
+                        history: list[dict]) -> tuple[str, list[dict]]:
     from google import genai
     from google.genai import types
 
-    tool_declarations = await mcp.as_gemini_tools()
+    declarations = await mcp.as_tool_declarations()
     tools = [
         types.Tool(function_declarations=[
             types.FunctionDeclaration(
@@ -159,16 +145,16 @@ async def _chat_gemini(user_message: str, mcp: McpClient, history: list[dict], p
                 description=d["description"],
                 parameters=d["parameters"],
             )
-            for d in tool_declarations
+            for d in declarations
         ])
     ]
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-    config = types.GenerateContentConfig(system_instruction=_build_system_prompt(pod), tools=tools)
+    config = types.GenerateContentConfig(system_instruction=_SYSTEM_PROMPT, tools=tools)
 
     contents = []
     for turn in history:
-        role = "user" if turn["role"] == "user" else "model"  # Gemini uses "model" not "assistant"
+        role = "user" if turn["role"] == "user" else "model"
         contents.append(types.Content(role=role, parts=[types.Part(text=turn["text"])]))
     contents.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
 
@@ -193,7 +179,6 @@ async def _chat_gemini(user_message: str, mcp: McpClient, history: list[dict], p
         for fc in tool_calls:
             logger.info("Gemini calling tool: %s", fc.name)
             tool_entry = {"tool": fc.name, "input": dict(fc.args)}
-            logger.info("Tool args: %s", json.dumps(dict(fc.args), default=str)[:300])
             try:
                 result = await mcp.call_tool(fc.name, dict(fc.args))
                 result_str = result if isinstance(result, str) else json.dumps(result)
@@ -217,18 +202,20 @@ async def _chat_gemini(user_message: str, mcp: McpClient, history: list[dict], p
 # Public entry point
 # ---------------------------------------------------------------------------
 
-async def chat(user_message: str, mcp: McpClient, history: list[dict] | None = None, pod: str = "") -> tuple[str, list[dict]]:
+async def chat(user_message: str, mcp: McpClient,
+               history: list[dict] | None = None) -> tuple[str, list[dict]]:
     h = history or []
-    if ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL:
+    if ANTHROPIC_API_KEY:
         logger.info("Using Claude (%s)", CLAUDE_MODEL)
         try:
-            return await _chat_claude(user_message, mcp, h, pod=pod)
+            import anthropic
+            return await _chat_claude(user_message, mcp, h)
         except anthropic.RateLimitError:
             logger.warning("Claude rate-limited — falling back to Gemini (%s)", GEMINI_MODEL)
             if GEMINI_API_KEY:
-                result, trace = await _chat_gemini(user_message, mcp, h, pod=pod)
-                trace.insert(0, {"note": "⚠️ Claude rate-limited — response from Gemini fallback"})
+                result, trace = await _chat_gemini(user_message, mcp, h)
+                trace.insert(0, {"note": "Claude rate-limited — response from Gemini fallback"})
                 return result, trace
-            raise  # No fallback available, let it bubble up
+            raise
     logger.info("Using Gemini (%s)", GEMINI_MODEL)
-    return await _chat_gemini(user_message, mcp, h, pod=pod)
+    return await _chat_gemini(user_message, mcp, h)

@@ -3,6 +3,9 @@ credentials.env
 slack.env
 container.env
 *Private*
+official_idmc_mcp_server/.env
+official_idmc_mcp_server/mcp-server.env
+official_idmc_mcp_server/ai-assistant.env
 
 # Python
 __pycache__/

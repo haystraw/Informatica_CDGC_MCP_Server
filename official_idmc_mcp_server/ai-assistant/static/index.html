@@ -31,7 +31,7 @@
       max-width: 95vw;
       box-shadow: 0 20px 60px rgba(0,0,0,.2);
     }
-    .gate-card h2 { font-size: 1.3rem; margin-bottom: 8px; color: #1a56a0; }
+    .gate-card h2 { font-size: 1.3rem; margin-bottom: 8px; color: #FF6D00; }
     .gate-card p  { font-size: 0.88rem; color: #666; margin-bottom: 20px; line-height: 1.5; }
     .gate-card textarea {
       width: 100%; height: 90px;
@@ -40,15 +40,15 @@
       font-family: monospace; font-size: 0.82rem;
       resize: none;
     }
-    .gate-card textarea:focus { outline: none; border-color: #1a56a0; }
+    .gate-card textarea:focus { outline: none; border-color: #FF6D00; }
     .gate-error { color: #c0392b; font-size: 0.85rem; margin-top: 8px; min-height: 20px; }
     .gate-actions { display: flex; gap: 10px; margin-top: 16px; align-items: center; }
-    .gate-actions a { font-size: 0.82rem; color: #1a56a0; text-decoration: none; }
+    .gate-actions a { font-size: 0.82rem; color: #FF6D00; text-decoration: none; }
     .gate-actions a:hover { text-decoration: underline; }
 
     /* ── Header ─────────────────────────────────────────────────── */
     header {
-      background: #1a56a0;
+      background: #FF6D00;
       color: white;
       padding: 14px 20px;
       display: flex; align-items: center; justify-content: space-between;
@@ -132,12 +132,12 @@
     }
     .trace-body.open { display: block; }
     .trace-tool { margin: 4px 0; }
-    .trace-tool .tool-name { color: #1a56a0; font-weight: bold; }
+    .trace-tool .tool-name { color: #FF6D00; font-weight: bold; }
     .trace-tool .tool-ok { color: #27ae60; }
     .trace-tool .tool-err { color: #c0392b; }
     .msg.user {
       align-self: flex-end;
-      background: #1a56a0;
+      background: #FF6D00;
       color: white;
       border-bottom-right-radius: 3px;
     }
@@ -170,7 +170,7 @@
     .thinking-step {
       display: block;
       font-size: 0.8rem;
-      color: #1a56a0;
+      color: #FF6D00;
       font-style: normal;
       margin-top: 4px;
       opacity: 0.85;
@@ -205,9 +205,9 @@
       overflow-y: auto;
       line-height: 1.4;
     }
-    #input-bar textarea:focus { outline: none; border-color: #1a56a0; }
+    #input-bar textarea:focus { outline: none; border-color: #FF6D00; }
     #btn-send {
-      background: #1a56a0;
+      background: #FF6D00;
       color: white;
       border: none;
       padding: 0 20px;
@@ -218,14 +218,14 @@
       flex-shrink: 0;
     }
     #btn-send:disabled { background: #aaa; cursor: default; }
-    #btn-send:hover:not(:disabled) { background: #154480; }
+    #btn-send:hover:not(:disabled) { background: #CC5600; }
 
     button.primary {
-      background: #1a56a0; color: white; border: none;
+      background: #FF6D00; color: white; border: none;
       padding: 10px 24px; border-radius: 6px;
       font-size: 0.95rem; cursor: pointer; font-weight: 500;
     }
-    button.primary:hover { background: #154480; }
+    button.primary:hover { background: #CC5600; }
   </style>
 </head>
 <body>
@@ -235,9 +235,8 @@
   <div class="gate-card">
     <h2>IDMC AI Assistant</h2>
     <p>Paste your <strong>X-IDMC-Token</strong> to connect to your Informatica environment.
-       Don't have one? <a href="https://idmc-mcp-server-668103879510.us-central1.run.app/enroll"
-         target="_blank"
-         title="Enrollment requires a password. Please reach out to Scott Hayes to obtain it.">Enroll here →</a></p>
+       Don't have one? <a href="/enroll" target="_blank"
+         title="Enrollment requires a password.">Enroll here →</a></p>
     <textarea id="token-input" placeholder="Paste your token here…" spellcheck="false"></textarea>
     <div class="gate-error" id="gate-error"></div>
     <div class="gate-actions">
@@ -256,18 +255,15 @@
 <div id="chat"></div>
 
 <div id="input-bar">
-  <textarea id="user-input" placeholder="Ask about your data catalog…" rows="1"
+  <textarea id="user-input" placeholder="Ask about your data, jobs, customers…" rows="1"
             onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
   <button id="btn-send" onclick="sendMessage()">Send</button>
 </div>
 
 <script>
-  // Display metadata stored in JS-readable cookies (org name, pod)
-  // The actual token is stored server-side in an httpOnly cookie — JS never sees it.
   let history = [];
   let currentPod = '';
 
-  // ── Cookie helpers (JS-readable cookies only) ─────────────────
   function setCookie(name, value, days) {
     const exp = new Date(Date.now() + days * 864e5).toUTCString();
     document.cookie = `${name}=${encodeURIComponent(value)};expires=${exp};path=/;SameSite=Lax`;
@@ -286,26 +282,17 @@
     badge.title = orgName;
   }
 
-  // ── Init — check if server-side session exists ─────────────────
   window.addEventListener('DOMContentLoaded', async () => {
     const savedOrg = getCookie('idmc_org');
     const savedPod = getCookie('idmc_pod');
     if (savedOrg) {
-      // Verify the httpOnly session cookie is still valid by probing /chat
-      try {
-        const probe = await fetch('/health');
-        // If org cookie exists, assume session is live (server will reject on first chat if not)
-        currentPod = savedPod || '';
-        setEnvBadge(savedOrg);
-        document.getElementById('gate').classList.add('hidden');
-        addMessage('assistant', `Connected to <strong>${savedOrg}</strong>. Ask me anything!`);
-      } catch (e) {
-        // Network error — show gate
-      }
+      currentPod = savedPod || '';
+      setEnvBadge(savedOrg);
+      document.getElementById('gate').classList.add('hidden');
+      addMessage('assistant', `Connected to <strong>${savedOrg}</strong>. Ask me anything!`);
     }
   });
 
-  // ── Token gate ────────────────────────────────────────────────
   async function submitToken() {
     const val = document.getElementById('token-input').value.trim();
     if (!val) {
@@ -327,8 +314,6 @@
         return;
       }
 
-      // Store only display metadata in JS-readable cookies
-      // The encrypted session token is set server-side as httpOnly
       setCookie('idmc_org', data.org_name || '', 30);
       setCookie('idmc_pod', data.pod || '', 30);
       currentPod = data.pod || '';
@@ -337,7 +322,7 @@
       document.getElementById('gate').classList.add('hidden');
       document.getElementById('gate-error').textContent = '';
       document.getElementById('token-input').value = '';
-      addMessage('assistant', `Connected to <strong>${data.org_name || data.pod}</strong>. Ask me anything about your IDMC catalog!`);
+      addMessage('assistant', `Connected to <strong>${data.org_name || data.pod}</strong>. Ask me about address verification, metadata search, customers, data provisioning, or job management!`);
     } catch (err) {
       document.getElementById('gate-error').textContent = 'Network error: ' + err.message;
     }
@@ -355,7 +340,6 @@
     document.getElementById('gate').classList.remove('hidden');
   }
 
-  // ── Chat ──────────────────────────────────────────────────────
   function addMessage(role, text) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
@@ -372,41 +356,26 @@
   }
 
   const TOOL_LABELS = {
-    internal_search: '🔍 Searching catalog index…',
-    search_assets: '🔍 Querying catalog…',
-    find_technical_datasets: '📂 Finding datasets…',
-    find_data_elements: '📋 Finding data elements…',
-    find_glossary_terms: '📖 Looking up glossary terms…',
-    find_dq_rules: '✅ Fetching DQ rules…',
-    find_catalog_sources_by_type: '🗄️ Finding catalog sources…',
-    get_asset: '📄 Fetching asset details…',
-    get_multiple_assets: '📄 Fetching asset details…',
-    list_catalog_sources: '🗄️ Listing catalog sources…',
-    list_profiles: '📊 Listing profiles…',
-    get_profile_columns: '📊 Fetching profile columns…',
-    get_column_profile: '📊 Fetching column statistics…',
-    get_profile_insights: '💡 Fetching CLAIRE insights…',
-    run_profile: '▶️ Running profile…',
-    get_profile_job_status: '⏳ Checking job status…',
-    list_users: '👥 Fetching users…',
-    list_connections: '🔌 Fetching connections…',
-    get_server_version: '⚙️ Checking server version…',
+    address_verification:    '📍 Verifying address…',
+    cdgc_search_metadata:    '🔍 Searching catalog…',
+    customer_identification: '👤 Searching customers…',
+    data_provisioning:       '📦 Managing data orders…',
+    job_management:          '⚙️ Checking jobs…',
+    list_upstream_tools:     '🛠️ Discovering tools…',
+    get_server_version:      '⚙️ Checking server version…',
   };
 
-  // Poll for tool call activity by watching a shared counter
-  let _thinkingDiv = null;
   let _thinkingInterval = null;
   let _thinkingStep = 0;
   const _thinkingMessages = [
     'Analyzing your question…',
     'Selecting the right tools…',
-    'Querying the catalog…',
+    'Calling Informatica APIs…',
     'Processing results…',
     'Synthesizing answer…',
   ];
 
   function startThinkingAnimation(div) {
-    _thinkingDiv = div;
     _thinkingStep = 0;
     _thinkingInterval = setInterval(() => {
       const step = document.getElementById('thinking-step');
@@ -417,14 +386,8 @@
     }, 3000);
   }
 
-  function updateThinkingTool(toolName) {
-    const step = document.getElementById('thinking-step');
-    if (step) step.textContent = TOOL_LABELS[toolName] || `⚙️ Calling ${toolName}…`;
-  }
-
   function stopThinkingAnimation() {
     if (_thinkingInterval) { clearInterval(_thinkingInterval); _thinkingInterval = null; }
-    _thinkingDiv = null;
   }
 
   function addTrace(msgDiv, trace) {

@@ -1,0 +1,154 @@
+###################################################################
+## Address Verification
+###################################################################
+{
+  "mcpServers": {
+    "address-verification": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://a2e-preview-c360-usw1-mcp.dmp-us.informaticacloud.com/mcp-servers/public/dqverifyaddress",
+        "--header",
+        "IDS-SESSION-ID:<SESSION-ID>"
+      ]
+    }
+  }
+}
+
+{
+  "mcpServers": {
+    "address-verification": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://a2e-prod-use4-mcp.dm-us.informaticacloud.com/mcp-servers/public/dqverifyaddress",
+        "--header",
+        "IDS-SESSION-ID:<SESSION-ID>"
+      ]
+    }
+  }
+}
+
+###################################################################
+## CDGC Metadata Search
+###################################################################
+{
+  "mcpServers": {
+    "cdgc-metadata-search": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://a2e-preview-c360-usw1-mcp.dmp-us.informaticacloud.com/mcp-servers/public/cdgcsearchmetadata",
+        "--header",
+        "IDS-SESSION-ID:<SESSION-ID>"
+      ]
+    }
+  }
+}
+
+{
+  "mcpServers": {
+    "cdgc-metadata-search": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://a2e-prod-use4-mcp.dm-us.informaticacloud.com/mcp-servers/public/cdgcsearchmetadata",
+        "--header",
+        "IDS-SESSION-ID:<SESSION-ID>"
+      ]
+    }
+  }
+}
+
+###################################################################
+## MDM Customer Identification
+###################################################################
+{
+  "mcpServers": {
+    "customer-identification": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://a2e-preview-c360-usw1-mcp.dmp-us.informaticacloud.com/mcp-servers/public/searchcustomer",
+        "--header",
+        "IDS-SESSION-ID:<SESSION-ID>"
+      ]
+    }
+  }
+}
+
+{
+  "mcpServers": {
+    "customer-identification": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://a2e-prod-use4-mcp.dm-us.informaticacloud.com/mcp-servers/public/searchcustomer",
+        "--header",
+        "IDS-SESSION-ID:<SESSION-ID>"
+      ]
+    }
+  }
+}
+
+###################################################################
+## Data Marketplace Data Provisioning
+###################################################################
+{
+  "mcpServers": {
+    "data-provisioning": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://a2e-preview-c360-usw1-mcp.dmp-us.informaticacloud.com/mcp-servers/public/dataprovisioning",
+        "--header",
+        "IDS-SESSION-ID:<SESSION-ID>"
+      ]
+    }
+  }
+}
+
+{
+  "mcpServers": {
+    "data-provisioning": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://a2e-prod-use4-mcp.dm-us.informaticacloud.com/mcp-servers/public/dataprovisioning",
+        "--header",
+        "IDS-SESSION-ID:<SESSION-ID>"
+      ]
+    }
+  }
+}
+
+###################################################################
+## Job Management
+###################################################################
+{
+  "mcpServers": {
+    "job-management": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://a2e-preview-c360-usw1-mcp.dmp-us.informaticacloud.com/mcp-servers/public/jobmanagement",
+        "--header",
+        "IDS-SESSION-ID:<SESSION-ID>"
+      ]
+    }
+  }
+}
+
+{
+  "mcpServers": {
+    "job-management": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://a2e-prod-use4-mcp.dm-us.informaticacloud.com/mcp-servers/public/jobmanagement",
+        "--header",
+        "IDS-SESSION-ID:<SESSION-ID>"
+      ]
+    }
+  }
+}

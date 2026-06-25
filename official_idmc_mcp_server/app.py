@@ -1,22 +1,25 @@
 """
-IDMC MCP Server — container entry point.
+Official IDMC MCP Server — container entry point.
 
-Adds enrollment UI routes directly onto the FastMCP app, then runs it via
-mcp.run() so the MCP task group is properly initialised. Token auth is handled
-via a raw ASGI middleware that never buffers the response stream.
+Adds enrollment UI routes onto the FastMCP app, then runs it via uvicorn.
+Token auth is handled via raw ASGI middleware that never buffers the response stream.
 """
-VERSION = "20260529.1"
 
 import logging
 import os
 import textwrap
-from datetime import datetime, timedelta
-from typing import Optional
 import threading
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional
 
-logger = logging.getLogger("idmc.mcp")
+from dotenv import load_dotenv
 
-from fastapi import Form, Query, Request
+load_dotenv(Path(__file__).parent / ".env")
+
+logger = logging.getLogger("idmc.official_mcp")
+
+from fastapi import Request
 from fastapi.responses import HTMLResponse
 from starlette.responses import Response
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -24,9 +27,6 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from token_auth import TokenError, create_token, decode_token
 from auth import request_credentials
 
-# ---------------------------------------------------------------------------
-# Config from environment
-# ---------------------------------------------------------------------------
 ENROLL_PASSWORD = os.environ.get("ENROLL_PASSWORD", "").strip()
 ENCRYPTION_KEY  = os.environ.get("ENCRYPTION_KEY", "").strip()
 
@@ -75,7 +75,7 @@ def _clear_failures(ip: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Import MCP server instance — must come after env config above
+# Import MCP server instance
 # ---------------------------------------------------------------------------
 from server import mcp  # noqa: E402
 
@@ -93,7 +93,6 @@ class TokenMiddleware:
             headers = dict(scope.get("headers", []))
             token = headers.get(b"x-idmc-token", b"").decode().strip()
 
-            # Also accept standard Bearer token: Authorization: Bearer <token>
             if not token:
                 auth = headers.get(b"authorization", b"").decode().strip()
                 if auth.lower().startswith("bearer "):
@@ -111,9 +110,9 @@ class TokenMiddleware:
                                status_code=401, media_type="application/json")(scope, receive, send)
                 return
 
+            import json as _json, sys as _sys
             forwarded = headers.get(b"x-forwarded-for", b"").decode()
             ip = forwarded.split(",")[0].strip() if forwarded else (scope.get("client") or ("?", 0))[0]
-            import json as _json, sys as _sys
             _sys.stdout.write("USAGE " + _json.dumps({
                 "event": "mcp_connect",
                 "pod": creds.get("pod", "?"),
@@ -134,7 +133,7 @@ class TokenMiddleware:
 
 
 # ---------------------------------------------------------------------------
-# Enroll UI helpers
+# Enroll UI
 # ---------------------------------------------------------------------------
 
 _CSS = """
@@ -142,7 +141,7 @@ _CSS = """
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
            background: #f5f5f5; color: #333; padding: 40px 20px; }
     .container { max-width: 720px; margin: 0 auto; }
-    header { background: #1a56a0; color: white; border-radius: 8px 8px 0 0; padding: 24px 32px; }
+    header { background: #FF6D00; color: white; border-radius: 8px 8px 0 0; padding: 24px 32px; }
     header h1 { font-size: 1.5rem; font-weight: 600; }
     header p  { margin-top: 6px; opacity: 0.85; font-size: 0.95rem; }
     .card { background: white; border-radius: 0 0 8px 8px; padding: 32px;
@@ -151,22 +150,32 @@ _CSS = """
     label:first-of-type { margin-top: 0; }
     input[type=text], input[type=password] { width: 100%; padding: 10px 12px;
         border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; }
-    input:focus { outline: none; border-color: #1a56a0; box-shadow: 0 0 0 3px rgba(26,86,160,.15); }
+    input:focus { outline: none; border-color: #FF6D00; box-shadow: 0 0 0 3px rgba(255,109,0,.15); }
     .hint { font-size: 0.82rem; color: #666; margin-top: 4px; }
-    button { margin-top: 24px; background: #1a56a0; color: white; border: none;
+    button { margin-top: 24px; background: #FF6D00; color: white; border: none;
              padding: 11px 28px; border-radius: 6px; font-size: 1rem; cursor: pointer; font-weight: 500; }
-    button:hover { background: #154480; }
+    button:hover { background: #CC5600; }
     .error { background: #fff0f0; border: 1px solid #f5c6c6; color: #c0392b;
              border-radius: 6px; padding: 12px 16px; margin-top: 20px; }
     .result { margin-top: 32px; border-top: 2px solid #e8e8e8; padding-top: 24px; }
-    .result h2 { font-size: 1.1rem; margin-bottom: 8px; margin-top: 20px; color: #1a56a0; }
+    .result h2 { font-size: 1.1rem; margin-bottom: 8px; margin-top: 20px; color: #FF6D00; }
     .result h2:first-child { margin-top: 0; }
     .result p { font-size: 0.9rem; color: #555; margin-bottom: 8px; }
     textarea { width: 100%; font-family: "SFMono-Regular", Consolas, monospace;
                font-size: 0.82rem; padding: 12px; border: 1px solid #ccc;
                border-radius: 6px; background: #fafafa; resize: vertical; height: 80px; }
     code { background: #f0f0f0; padding: 2px 5px; border-radius: 3px; font-size: 0.85em; }
+    .services-section { margin-top: 20px; }
+    .services-section legend { font-weight: 500; margin-bottom: 10px; display: block; }
+    .service-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .service-checks label { display: flex; align-items: center; gap: 8px;
+        font-weight: normal; margin-top: 0; cursor: pointer;
+        background: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 6px;
+        padding: 8px 12px; transition: background .15s; }
+    .service-checks label:hover { background: #fff3eb; border-color: #FF6D00; }
+    .service-checks input[type=checkbox] { width: 16px; height: 16px; accent-color: #FF6D00; }
 """
+
 
 def _page(body: str) -> str:
     return f"""<!DOCTYPE html><html lang="en"><head>
@@ -177,6 +186,7 @@ def _page(body: str) -> str:
     <p>Enroll your Informatica credentials to generate a connection token.</p></header>
   <div class="card">{body}</div>
 </div></body></html>"""
+
 
 def _password_gate(error: str = "") -> str:
     err = f'<div class="error">{error}</div>' if error else ""
@@ -189,8 +199,25 @@ def _password_gate(error: str = "") -> str:
         <button type="submit">Continue</button>
       </form>{err}""")
 
-def _credentials_form(verified_password: str, error: str = "", pod: str = "") -> str:
+
+_SERVICES = [
+    ("address_verification",    "Address Verification"),
+    ("cdgc_metadata_search",    "CDGC Metadata Search"),
+    ("customer_identification", "Customer Identification"),
+    ("data_provisioning",       "Data Provisioning"),
+    ("job_management",          "Job Management"),
+]
+
+
+def _credentials_form(verified_password: str, error: str = "", pod: str = "",
+                       selected_services: list = None) -> str:
     err = f'<div class="error">{error}</div>' if error else ""
+    enabled = set(selected_services) if selected_services else {s[0] for s in _SERVICES}
+    checkboxes = "\n".join(
+        f'<label><input type="checkbox" name="services" value="{key}"'
+        f'{"  checked" if key in enabled else ""}> {label}</label>'
+        for key, label in _SERVICES
+    )
     return _page(f"""
       <form method="POST" action="/enroll">
         <input type="hidden" name="step" value="enroll">
@@ -206,17 +233,22 @@ def _credentials_form(verified_password: str, error: str = "", pod: str = "") ->
         <label for="password">Password</label>
         <input type="password" id="password" name="password"
                placeholder="Your IDMC password" required>
+        <div class="services-section">
+          <legend>Enabled Services</legend>
+          <div class="service-checks">{checkboxes}</div>
+        </div>
         <button type="submit">Generate Token</button>
       </form>{err}""")
 
+
 def _results_page(token: str, pod: str, server_url: str) -> str:
     mcp_url = f"{server_url}/mcp"
-    host = server_url.rstrip("/")   # e.g. https://idmc-mcp-server-...run.app
+    host = server_url.rstrip("/")
 
-    claude_code_config = textwrap.dedent(f"""\
+    claude_config = textwrap.dedent(f"""\
         {{
           "mcpServers": {{
-            "idmc": {{
+            "idmc-official": {{
               "type": "http",
               "url": "{mcp_url}",
               "headers": {{
@@ -225,31 +257,6 @@ def _results_page(token: str, pod: str, server_url: str) -> str:
             }}
           }}
         }}""")
-
-    claude_desktop_config = textwrap.dedent(f"""\
-        {{
-          "mcpServers": {{
-            "idmc": {{
-              "type": "http",
-              "url": "{mcp_url}",
-              "headers": {{
-                "X-IDMC-Token": "{token}"
-              }}
-            }}
-          }}
-        }}""")
-
-    databricks_sql = textwrap.dedent(f"""\
-        -- Pre-step: grant permission if needed
-        GRANT CREATE CONNECTION ON METASTORE TO <your_user_or_group>;
-
-        -- Step 1: Create the HTTP connection
-        CREATE CONNECTION idmc TYPE HTTP OPTIONS (
-          host '{host}',
-          port '443',
-          base_path '/mcp',
-          bearer_token '{token}'
-        );""")
 
     return _page(f"""
       <div class="result">
@@ -257,31 +264,9 @@ def _results_page(token: str, pod: str, server_url: str) -> str:
         <p>Copy this token and keep it private — it contains your encrypted credentials.</p>
         <textarea readonly onclick="this.select()">{token}</textarea>
 
-        <h2>Claude Code (VS Code / CLI)</h2>
-        <p>Add to <code>~/.claude/settings.json</code> (Windows: <code>%USERPROFILE%\.claude\settings.json</code>):</p>
-        <textarea readonly onclick="this.select()" style="height:180px">{claude_code_config}</textarea>
-
-        <h2>Claude Desktop</h2>
-        <p>Add to <code>%APPDATA%\Claude\claude_desktop_config.json</code>
-           (Windows) or <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS):</p>
-        <textarea readonly onclick="this.select()" style="height:180px">{claude_desktop_config}</textarea>
-
-        <h2>Databricks Genie Code</h2>
-        <p><strong>Pre-step:</strong> Ensure you have permission to create connections, then run this SQL:</p>
-        <textarea readonly onclick="this.select()" style="height:160px">{databricks_sql}</textarea>
-
-        <p style="margin-top:12px"><strong>Step 2 — Mark as MCP connection:</strong><br>
-        If created via SQL, go to <em>AI Gateway &gt; MCPs</em> in the Databricks UI and verify it appears there.<br>
-        If created via the Catalog UI, check the <strong>"Is MCP connection"</strong> checkbox during setup.</p>
-
-        <p style="margin-top:12px"><strong>Step 3 — Add to Genie Code:</strong></p>
-        <ol style="margin-left:20px; font-size:0.9rem; line-height:1.8">
-          <li>Open a Genie Code panel and click the <strong>⚙ Settings</strong> icon (top of panel)</li>
-          <li>Under <em>MCP Servers</em>, click <strong>+ Add Server</strong></li>
-          <li>Select <strong>External MCP server</strong></li>
-          <li>Choose your <code>idmc</code> connection from the list</li>
-          <li>Click <strong>Save</strong></li>
-        </ol>
+        <h2>Claude Code / Claude Desktop</h2>
+        <p>Add to <code>~/.claude/settings.json</code> or Claude Desktop config:</p>
+        <textarea readonly onclick="this.select()" style="height:180px">{claude_config}</textarea>
 
         <h2>Any other MCP client</h2>
         <p>URL: <code>{mcp_url}</code><br>
@@ -290,7 +275,7 @@ def _results_page(token: str, pod: str, server_url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Register enrollment routes on the MCP app's internal FastAPI router
+# Enrollment routes
 # ---------------------------------------------------------------------------
 
 @mcp.custom_route("/enroll", methods=["GET"])
@@ -317,11 +302,12 @@ async def enroll_post(request: Request) -> HTMLResponse:
         return HTMLResponse(_password_gate(error="Server misconfiguration: ENCRYPTION_KEY is not set."), status_code=500)
 
     form = await request.form()
-    step             = form.get("step", "")
-    enroll_password  = form.get("enroll_password", "")
-    pod              = form.get("pod", "")
-    username         = form.get("username", "")
-    password         = form.get("password", "")
+    step            = form.get("step", "")
+    enroll_password = form.get("enroll_password", "")
+    pod             = form.get("pod", "")
+    username        = form.get("username", "")
+    password        = form.get("password", "")
+    services        = form.getlist("services")
 
     ip = _get_client_ip(request)
     if msg := _check_lockout(ip):
@@ -334,7 +320,8 @@ async def enroll_post(request: Request) -> HTMLResponse:
         return HTMLResponse(_credentials_form(verified_password=enroll_password))
 
     try:
-        token = create_token(pod=pod.strip(), username=username.strip(), password=password)
+        token = create_token(pod=pod.strip(), username=username.strip(),
+                             password=password, services=services)
     except TokenError as e:
         return HTMLResponse(_credentials_form(verified_password=enroll_password, error=str(e), pod=pod), status_code=500)
 
@@ -343,12 +330,18 @@ async def enroll_post(request: Request) -> HTMLResponse:
         "event": "enroll",
         "pod": pod.strip(),
         "user": username.strip(),
-        "ip": ip,
+        "ip": _get_client_ip(request),
     }) + "\n")
     _sys.stdout.flush()
 
     server_url = str(request.base_url).rstrip("/")
     return HTMLResponse(_results_page(token=token, pod=pod.strip(), server_url=server_url))
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request: Request) -> Response:
+    return Response('{"status": "ok", "server": "official-idmc-mcp"}',
+                    media_type="application/json")
 
 
 @mcp.custom_route("/", methods=["GET"])
@@ -357,7 +350,7 @@ async def root(request: Request) -> HTMLResponse:
 
 
 # ---------------------------------------------------------------------------
-# Wire up token middleware and expose the ASGI app for uvicorn
+# Wire up middleware and expose ASGI app for uvicorn
 # ---------------------------------------------------------------------------
 
 app = TokenMiddleware(mcp.streamable_http_app())

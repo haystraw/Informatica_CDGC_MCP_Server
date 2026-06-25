@@ -74,7 +74,12 @@ def search_assets(
     size: int = 20,
     segments: str = "all",
 ) -> dict:
-    """Search for assets in the CDGC catalog.
+    """Search for assets in the CDGC catalog using the knowledge query language.
+
+    PREFER internal_search OVER THIS TOOL when possible — it is faster, supports
+    bulk fetch by ID, and handles complex filters in one call. Use this tool only
+    when you need the natural-language knowledge query syntax (e.g. "tables related
+    to CDEs", "assets related to Policy X") that internal_search cannot express.
 
     Before constructing a query, read the resource examples://cdgc-search-queries
     for proven query patterns organized by category (policies, DQ, lineage, CDEs, etc.).
@@ -107,6 +112,10 @@ def get_asset(
 ) -> dict:
     """Get full details of a single CDGC asset by ID.
 
+    NOTE: If you need details for MORE THAN ONE asset, use internal_search with a
+    terms query on core.identity instead — it fetches all of them in a single call
+    and is significantly faster than calling this tool in a loop.
+
     Args:
         asset_id: Asset UUID (scheme="internal") or reference like "BT-123" (scheme="external").
         scheme: "internal" (UUID) or "external" (reference ID). Default "internal".
@@ -131,10 +140,15 @@ def get_multiple_assets(
     scheme: str = "internal",
     segments: str = "all",
 ) -> dict:
-    """Get details for multiple CDGC assets in one call.
+    """Get details for multiple CDGC assets in one call. Limited to 5 IDs per call.
+
+    PREFER internal_search FOR BULK FETCHING — it has no 5-ID limit and returns
+    results faster. Use a terms query on core.identity:
+      {"query": {"bool": {"must": [{"terms": {"elementType": ["OBJECT"]}},
+        {"terms": {"core.identity": ["id1", "id2", ...]}}]}}}
 
     Args:
-        asset_ids: List of asset IDs.
+        asset_ids: List of asset IDs (max 5).
         scheme: "internal" (UUIDs) or "external" (reference IDs). Default "internal".
         segments: Detail level.
 
@@ -1550,6 +1564,63 @@ def get_runtime_environment_by_name(runtime_environment_name: str) -> dict:
 
 
 # ===========================================================================
+# CDGC INTERNAL ELASTICSEARCH SEARCH
+# Direct Elasticsearch queries via /ccgf-searchv2/api/v1/search.
+# More powerful than search_assets: supports bulk fetch by ID, relationship
+# traversal, classType filters, and complex bool queries in one call.
+# Before constructing a query, read examples://cdgc-es-queries for patterns.
+# ===========================================================================
+
+@mcp.tool()
+def internal_search(
+    body: dict,
+) -> dict:
+    """Execute an Elasticsearch query against the CDGC internal search index.
+
+    More powerful than search_assets — use this for:
+    - Bulk fetching many assets by ID in one call (avoids looping with get_asset)
+    - Filtering by classType, lifecycle, origin, curation status, or any field
+    - Traversing relationships (elementType=RELATIONSHIP queries)
+    - Finding CDEs, DQ rule occurrences, glossary links, policy/classification links
+    - Complex boolean queries with must/filter/should clauses
+
+    IMPORTANT: Before constructing a query, read the resource examples://cdgc-es-queries
+    for proven query patterns and a complete classType reference table.
+
+    Args:
+        body: Elasticsearch query body. Must be a valid ES bool query dict. Example:
+            {
+              "from": 0,
+              "size": 100,
+              "query": {
+                "bool": {
+                  "must": [{"terms": {"elementType": ["OBJECT"]}}],
+                  "filter": [{"terms": {"core.classType": ["com.infa.ccgf.models.governance.BusinessTerm"]}}]
+                }
+              },
+              "sort": [{"core.name": {"order": "asc"}}]
+            }
+
+    Returns:
+        Elasticsearch response with hits.hits[] containing matched assets.
+        Each hit has _source.core.identity, _source.core.name, _source.core.classType.
+    """
+    s = get_session()
+    resp = requests.post(
+        f"{s.cdgc_api_url}/ccgf-searchv2/api/v1/search",
+        json=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {s.get_jwt()}",
+            "X-INFA-SEARCH-LANGUAGE": "elasticsearch",
+            "Cookie": f"USER_SESSION={s.session_id}",
+        },
+        timeout=60,
+    )
+    return _r(resp)
+
+
+# ===========================================================================
 # DATA PROFILING APIs
 # Base URL derived from login: https://{pod}-dqprofile.dm-{region}.informaticacloud.com
 # ===========================================================================
@@ -2017,6 +2088,19 @@ def find_catalog_sources_by_type(
 # ===========================================================================
 # Resources
 # ===========================================================================
+
+@mcp.resource("examples://cdgc-es-queries")
+def cdgc_es_query_examples() -> str:
+    """Elasticsearch query examples for the internal_search tool.
+
+    Covers: bulk fetch by ID, CDEs, DQ rule occurrences, Business Terms,
+    Policies, Classifications, relationship traversal, lineage, Databricks,
+    Power BI, Tableau, Marketplace, and a complete classType reference.
+    """
+    path = os.path.join(os.path.dirname(__file__), "es_query_examples.md")
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
 
 @mcp.resource("examples://cdgc-search-queries")
 def cdgc_search_query_examples() -> str:
